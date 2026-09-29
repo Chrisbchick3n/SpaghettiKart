@@ -570,6 +570,20 @@ void PortMenu::AddDevTools() {
         .WindowName("Console");
 }
 
+void PortMenu::AddNetplay() {
+    AddMenuEntry("Online", "gSettings.Menu.OnlineSidebarSection");
+    WidgetPath path = { "Online", "Netplay", SECTION_COLUMN_1 };
+    AddSidebarEntry("Online", "Netplay", 1);
+    AddWidget(path, "Online Multiplayer", WIDGET_SEPARATOR_TEXT);
+    AddWidget(path, "Race friends online in real time. Everyone needs the same SpaghettiKart netplay build and "
+                    "their own US Mario Kart 64 ROM.",
+              WIDGET_TEXT);
+    AddWidget(path, "Open Netplay Window", WIDGET_WINDOW_BUTTON)
+        .CVar("gNetplayWindowOpen")
+        .Options(ButtonOptions().Tooltip("Host or join an online race session."))
+        .WindowName("Netplay");
+}
+
 void PortMenu::AddSceneVisibility() {
     WidgetPath path = { "Developer", "Scene Visibility", SECTION_COLUMN_1 };
     AddSidebarEntry("Developer", "Scene Visibility", 1);
@@ -631,6 +645,7 @@ void PortMenu::InitElement() {
     Ship::Menu::InitElement();
     AddSettings();
     AddEnhancements();
+    AddNetplay();
     AddDevTools();
 
     if (CVarGetInteger("gSettings.Menu.SidebarSearch", 0)) {

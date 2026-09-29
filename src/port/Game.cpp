@@ -32,6 +32,7 @@
 #include "engine/cameras/LookBehindCamera.h"
 
 #include "engine/TrackBrowser.h"
+#include "enhancements/netplay/netplay.h"
 #include "engine/RandomItemTable.h"
 #include "engine/sky/Sky.h"
 
@@ -921,6 +922,10 @@ void CM_ResetAudio(void) {
 static std::atomic<bool> sResetRequested{ false };
 
 void CM_RequestReset(void) {
+    // A manual reset by one player during an online session would desync everyone else.
+    if (Netplay_InSession()) {
+        return;
+    }
     sResetRequested.store(true);
 }
 
@@ -981,6 +986,9 @@ static void ApplyPendingReset() {
     // advance the stale screen right after the reset.
     gMenuFadeType = 0;
     gFadeModeSelection = FADE_MODE_LOGO;
+
+    // If an online session is starting, load the host's snapshot now that the reset has run.
+    Netplay_OnReset();
 }
 
 void push_frame() {

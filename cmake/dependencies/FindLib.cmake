@@ -39,3 +39,9 @@ endif()
 
 target_link_libraries(${PROJECT_NAME}
                       PRIVATE torch ${ADDITIONAL_LIBRARY_DEPENDENCIES})
+
+# Online netplay: sockets on Windows, and a build id so only identical builds can race together.
+if(WIN32)
+  target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
+endif()
+target_compile_definitions(${PROJECT_NAME} PRIVATE NETPLAY_BUILD_ID="${PROJECT_VERSION}")
