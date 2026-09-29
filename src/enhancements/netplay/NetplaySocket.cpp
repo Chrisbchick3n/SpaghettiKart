@@ -4,6 +4,10 @@
 #include <cstring>
 
 #ifdef _WIN32
+// Winsock's select() handles only 64 sockets by default; the relay can have many more.
+#ifndef FD_SETSIZE
+#define FD_SETSIZE 1024
+#endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -159,8 +163,7 @@ bool Connection::Connect(const std::string& host, uint16_t port, int timeoutMs, 
     }
     freeaddrinfo(res);
     if (!ok) {
-        err = "Could not connect to " + host + ":" + portStr +
-              " (is the host running, and is the port forwarded or are you on the same VPN?)";
+        err = "Could not connect to " + host + ":" + portStr + ".";
     }
     return ok;
 }

@@ -30,11 +30,15 @@ void NetplayWindow::DrawElement() {
     static int sPort = Netplay::kDefaultPort;
     static int sDelay = 3;
     static char sChat[128] = "";
+    static char sCode[16] = "";
+    static char sRelay[128] = "";
+    static const char* kBuiltInRelay = Netplay::kDefaultRelay;
     static std::string sError;
 
     if (sName[0] == '\0') {
         strncpy(sName, CVarGetString("gNetplayName", "Player"), sizeof(sName) - 1);
         strncpy(sAddress, CVarGetString("gNetplayAddress", ""), sizeof(sAddress) - 1);
+        strncpy(sRelay, CVarGetString("gNetplayRelay", ""), sizeof(sRelay) - 1);
         sPort = CVarGetInteger("gNetplayPort", Netplay::kDefaultPort);
         sDelay = CVarGetInteger("gNetplayInputDelay", 3);
     }
@@ -55,52 +59,45 @@ void NetplayWindow::DrawElement() {
     }
 
     if (!st.connected && !st.inSession) {
-        // ---------------- Offline: host or join ----------------
         if (ImGui::InputText("Your name", sName, sizeof(sName))) {
             CVarSetString("gNetplayName", sName);
             CVarSave();
         }
         std::string displayName = std::string(sName) + " (" + PlatformName() + ")";
-        ImGui::InputInt("Port", &sPort);
-        if (sPort < 1 || sPort > 65535) {
-            sPort = Netplay::kDefaultPort;
+        const std::string relay = Netplay::RelayAddress();
+        const bool haveRelay = !relay.empty();
+
+        // ---------------- Play online (through the online server) ----------------
+        ImGui::Spacing();
+        ImGui::SeparatorText("Play online");
+        if (!haveRelay) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.85f, 0.3f, 1.0f));
+            ImGui::TextWrapped("This build has no online server set. Enter one under Advanced (ask whoever shared "
+                               "the game), or use a direct connection.");
+            ImGui::PopStyleColor();
         }
+        ImGui::BeginDisabled(!haveRelay);
+        if (ImGui::Button("Host a game")) {
+            sError.clear();
+            Netplay::HostOnline(displayName, sError);
+        }
+        ImGui::SameLine();
+        ImGui::TextDisabled("You get a code to send your friends.");
 
         ImGui::Spacing();
-        ImGui::SeparatorText("Host a game");
-        ImGui::TextWrapped("Friends connect to your IP address. They need TCP port %d forwarded on your router, or "
-                           "all of you on the same VPN (Tailscale, ZeroTier, Radmin VPN).",
-                           sPort);
-        if (ImGui::Button("Host")) {
-            CVarSetInteger("gNetplayPort", sPort);
-            CVarSave();
+        ImGui::SetNextItemWidth(120);
+        bool enter = ImGui::InputTextWithHint("##code", "CODE", sCode, sizeof(sCode),
+                                              ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_CharsNoBlank |
+                                                  ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(sCode[0] == '\0');
+        if (ImGui::Button("Join a game") || (enter && sCode[0] != '\0')) {
             sError.clear();
-            if (!Netplay::Host((uint16_t) sPort, displayName, sError)) {
-                // error shown below
-            }
+            Netplay::JoinRoom(sCode, displayName, sError);
         }
-
-        ImGui::Spacing();
-        ImGui::SeparatorText("Join a game");
-        if (ImGui::InputText("Host address", sAddress, sizeof(sAddress))) {
-            CVarSetString("gNetplayAddress", sAddress);
-            CVarSave();
-        }
-        ImGui::BeginDisabled(sAddress[0] == '\0');
-        if (ImGui::Button("Join")) {
-            CVarSetInteger("gNetplayPort", sPort);
-            CVarSave();
-            sError.clear();
-            std::string host = sAddress;
-            uint16_t port = (uint16_t) sPort;
-            // Accept "1.2.3.4:25564" too (but leave bare IPv6 addresses alone)
-            size_t colon = host.rfind(':');
-            if (colon != std::string::npos && host.find(':') == colon) {
-                port = (uint16_t) atoi(host.c_str() + colon + 1);
-                host = host.substr(0, colon);
-            }
-            Netplay::Join(host, port, displayName, sError);
-        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextDisabled("Type the code your friend sent.");
         ImGui::EndDisabled();
 
         if (!sError.empty()) {
@@ -108,8 +105,67 @@ void NetplayWindow::DrawElement() {
             ImGui::TextWrapped("%s", sError.c_str());
             ImGui::PopStyleColor();
         }
+
+        // ---------------- Advanced ----------------
+        ImGui::Spacing();
+        if (ImGui::CollapsingHeader("Advanced")) {
+            ImGui::SeparatorText("Online server");
+            if (ImGui::InputTextWithHint("Server address", kBuiltInRelay[0] ? kBuiltInRelay : "relay.example.com",
+                                         sRelay, sizeof(sRelay))) {
+                CVarSetString("gNetplayRelay", sRelay);
+                CVarSave();
+            }
+            if (kBuiltInRelay[0] != '\0') {
+                ImGui::TextDisabled("Leave empty to use the server built into this build (%s).", kBuiltInRelay);
+            } else {
+                ImGui::TextDisabled("This build has no server built in, so one must be entered here.");
+            }
+
+            ImGui::SeparatorText("Direct connection (port forwarding or VPN)");
+            ImGui::InputInt("Port", &sPort);
+            if (sPort < 1 || sPort > 65535) {
+                sPort = Netplay::kDefaultPort;
+            }
+            ImGui::TextWrapped("Friends connect to your IP address. They need TCP port %d forwarded on your router, "
+                               "or all of you on the same VPN (Tailscale, ZeroTier, Radmin VPN).",
+                               sPort);
+            if (ImGui::Button("Host on this PC")) {
+                CVarSetInteger("gNetplayPort", sPort);
+                CVarSave();
+                sError.clear();
+                Netplay::Host((uint16_t) sPort, displayName, sError);
+            }
+            if (ImGui::InputText("Host address", sAddress, sizeof(sAddress))) {
+                CVarSetString("gNetplayAddress", sAddress);
+                CVarSave();
+            }
+            ImGui::BeginDisabled(sAddress[0] == '\0');
+            if (ImGui::Button("Join by address")) {
+                CVarSetInteger("gNetplayPort", sPort);
+                CVarSave();
+                sError.clear();
+                std::string host;
+                uint16_t port;
+                // Accepts "1.2.3.4", "1.2.3.4:25564", "[v6]:port" (bare IPv6 addresses are left alone)
+                Netplay::SplitHostPort(sAddress, host, port, (uint16_t) sPort);
+                Netplay::Join(host, port, displayName, sError);
+            }
+            ImGui::EndDisabled();
+        }
     } else {
         // ---------------- Lobby / session ----------------
+        if (!st.roomCode.empty()) {
+            ImGui::Text("Game code:");
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s", st.roomCode.c_str());
+            ImGui::SameLine();
+            if (ImGui::Button("Copy")) {
+                ImGui::SetClipboardText(st.roomCode.c_str());
+            }
+            if (!st.inSession && st.isLeader) {
+                ImGui::TextDisabled("Send this code to your friends. They press Join a game and type it in.");
+            }
+        }
         ImGui::SeparatorText(st.inSession ? "Racing" : "Lobby");
         for (size_t i = 0; i < st.lobby.size(); i++) {
             ImGui::BulletText("Player %d: %s%s", (int) i + 1, st.lobby[i].c_str(), i == 0 ? "  [host]" : "");

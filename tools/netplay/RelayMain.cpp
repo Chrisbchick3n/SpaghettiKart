@@ -1,18 +1,21 @@
-// spaghetti-netplay-relay: a dedicated host for SpaghettiKart online sessions.
-// Run it on any machine that friends can reach (a PC with the port forwarded, or a cheap VPS), then everyone
-// uses "Join" in the game. The first player to join is the session leader who picks settings and starts.
+// spaghetti-netplay-relay: the online server behind "Host online" / "Join with code" in SpaghettiKart.
 //
-//   spaghetti-netplay-relay [port]
+// Run it once on any always-on machine that has a public address (a cheap VPS, a free cloud VM, or a home PC
+// with this one port forwarded). Players never need port forwarding or a VPN: they all connect out to this.
+// Build the game with -DNETPLAY_DEFAULT_RELAY=your.server.address so players don't have to type it.
+//
+//   spaghetti-netplay-relay [port]        (default 25564, or the PORT environment variable)
 #include "NetplayProtocol.h"
-#include "NetplayServer.h"
+#include "RoomRelay.h"
 
-#include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <thread>
 
 int main(int argc, char** argv) {
     int port = Netplay::kDefaultPort;
+    if (const char* env = getenv("PORT")) {
+        port = atoi(env);
+    }
     if (argc > 1) {
         port = atoi(argv[1]);
     }
@@ -20,16 +23,14 @@ int main(int argc, char** argv) {
         fprintf(stderr, "usage: %s [port]\n", argv[0]);
         return 2;
     }
-    Netplay::NetInit();
-    Netplay::Server server;
+    Netplay::RoomRelay relay;
     std::string err;
-    if (!server.Start((uint16_t) port, err)) {
+    if (!relay.Start((uint16_t) port, err)) {
         fprintf(stderr, "Could not start: %s\n", err.c_str());
         return 1;
     }
-    printf("SpaghettiKart netplay relay listening on TCP port %d. Press Ctrl+C to stop.\n", port);
+    printf("SpaghettiKart online relay listening on TCP port %d. Press Ctrl+C to stop.\n", port);
     fflush(stdout);
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
-    }
+    relay.Run();
+    return 0;
 }

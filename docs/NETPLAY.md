@@ -19,14 +19,17 @@ You'll see the race in split screen, just like 2-4 player couch multiplayer on t
 
 1. Press **Esc** to open the settings menu → **Online** → **Open Netplay Window**.
 2. Type your name.
-3. **Host:** press **Host**. Give your friends your IP address.
-   **Friends:** type the host's IP (e.g. `203.0.113.7` or `203.0.113.7:25564`) and press **Join**.
+3. **Host:** press **Host a game**. You get a short **game code** (like `K7QXA`). Press **Copy** and send it to
+   your friends.
+   **Friends:** type the code in the box and press **Join a game**.
+   Nobody needs port forwarding, a VPN, or an IP address: everyone connects to the online server, which passes
+   the inputs along.
 4. When everyone is listed in the lobby, the host picks an **input delay** and presses **Start Session**.
    Everyone's game resets to the title screen using the host's settings and save data.
 5. In the game's own menus, choose **2P / 3P / 4P** to match the number of people. Player 1 is the host,
    player 2 is the first friend who joined, and so on. Anyone can navigate the menus.
 6. Race! The host can press **End Session** to return everyone to the lobby (e.g. to change the input delay).
-   To quit, press **Leave** / **Stop hosting**.
+   To quit, press **Leave**. The code stops working once everyone has left.
 
 ### Input delay
 
@@ -42,18 +45,42 @@ Too low → the game stutters while it waits for other players. Too high → con
 The Netplay window shows a connection indicator; if it says "stutter" or "laggy", start a new session with a
 higher delay (host: **End Session**, change the slider, **Start Session**).
 
-## Hosting: letting friends reach you
+## The online server (for whoever publishes the builds)
 
-The host listens on **TCP port 25564** (changeable in the window). Friends outside your home network can only
-connect if one of these is true:
+**Host a game / Join a game** go through a small relay server, `spaghetti-netplay-relay`. Players only ever
+connect *out* to it, which works on every home network, including mobile, satellite and carrier-grade NAT, so
+players never touch their routers. One relay serves many groups at once, each with its own code.
 
-- **Easiest: a VPN app** like [Tailscale](https://tailscale.com), ZeroTier or Radmin VPN. Everyone installs it and
-  joins the same network, then friends use the host's VPN IP. No router changes needed.
-- **Port forwarding:** forward TCP 25564 on the host's router to the host's PC, and allow SpaghettiKart through
-  the firewall. Friends use the host's public IP.
-- **Dedicated relay:** run `spaghetti-netplay-relay` on any always-on machine or cheap VPS with the port open.
-  Everyone (including the "host") uses **Join** to connect to it. The first person to join picks the settings and
-  starts the session.
+The relay has to run somewhere with a public address. Set it up **once**:
+
+- **Fly.io (easiest, about $4/month):** install `flyctl`, then from `tools/netplay/`:
+  `fly launch --no-deploy --copy-config --name my-spaghetti-relay`, `fly ips allocate-v4`, `fly deploy`.
+  The address is `my-spaghetti-relay.fly.dev`.
+- **Any Linux VPS, or Oracle Cloud's Always Free VM (free):** run
+  `curl -fsSL https://raw.githubusercontent.com/Chrisbchick3n/SpaghettiKart/netplay/tools/netplay/install-relay.sh | sudo sh`.
+  It builds the relay, runs a self-test, starts it on boot, and prints the address. Also open **TCP 25564** in
+  the provider's firewall (Oracle: VCN → Security List → Ingress rule).
+- **Docker anywhere:** `docker build -t spaghetti-relay tools/netplay` then
+  `docker run -d --restart unless-stopped -p 25564:25564 spaghetti-relay`.
+- **Your own always-on PC:** run `spaghetti-netplay-relay` and forward TCP 25564 on *your* router. Only the
+  person running the relay does this, once. It only works while that PC is on.
+
+Then build the address into the game so players don't have to type anything: in GitHub, open
+**Settings → Secrets and variables → Actions → Variables** and add `NETPLAY_RELAY` = the address (`host` or
+`host:port`). Every build after that has it. (Local builds: `-DNETPLAY_DEFAULT_RELAY=host`.) Players can
+override it in the Netplay window under **Advanced → Online server**.
+
+Each CI run also uploads a ready-made Linux relay binary (`spaghetti-netplay-relay-linux-x64`).
+
+Relay bandwidth is tiny (a few KB/s per player), so the smallest server is plenty. Put it near your players:
+every input makes a round trip through it, so a server far away means you need a higher input delay.
+
+### Direct connection (no server)
+
+Under **Advanced** you can still host straight from your PC with **Host on this PC** (port **25564**, changeable).
+Friends use **Join by address** with your IP. This needs TCP 25564 forwarded on the host's router, or everyone on
+the same VPN ([Tailscale](https://tailscale.com), ZeroTier, Radmin VPN). Plain **Join by address** pointed at a
+relay also works; everyone who does that shares one lobby.
 
 ## Desyncs
 
@@ -93,8 +120,10 @@ would make your game different from everyone else's.
 - `src/port/ui/NetplayWindow.cpp` — the ImGui window.
 - Hooks: `read_controllers()` in `src/main.c`, the end of `ApplyPendingReset()` in `src/port/Game.cpp`,
   EEPROM writes in `src/save.c`.
-- `tools/netplay/` — standalone relay server and a headless loopback test (3-4 simulated players; checks that
-  games stay identical, that desyncs are detected, and that dropped players don't stop the race):
+- `tools/netplay/` — the online relay (`RoomRelay`: room codes, one lockstep `Server` per room), its deployment
+  files (Dockerfile, fly.toml, install-relay.sh), and a headless loopback test (3-4 simulated players, direct and
+  through the relay; checks that games stay identical, desyncs are detected, dropped players don't stop the race,
+  rooms stay separate and bad codes are refused):
 
   ```sh
   cmake -S tools/netplay -B build-netplay && cmake --build build-netplay

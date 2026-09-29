@@ -12,6 +12,7 @@
 // apart from a one-time snapshot at session start and periodic desync-check hashes.
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -26,6 +27,70 @@ constexpr int kMaxInputDelay = 10;
 constexpr uint32_t kHashInterval = 60; // frames between desync checks (~2 s at 30 fps)
 constexpr uint32_t kMaxMessageSize = 1 << 20;
 
+// Online play through a relay server ("Host online" / "Join with code").
+// Players only ever connect OUT to the relay, so nobody needs port forwarding or a VPN. The relay runs one
+// lockstep Server per room; the first message on a relay connection picks the room:
+//   C2S_ROOM_CREATE -> relay makes a new room and answers S2C_ROOM with its code
+//   C2S_ROOM_JOIN   -> relay answers S2C_ROOM (same code) or S2C_REJECT ("no room with that code")
+// After that, the connection is a normal netplay connection (C2S_HELLO, lobby, session...).
+// The relay address baked into official builds comes from the NETPLAY_DEFAULT_RELAY compile definition
+// ("host" or "host:port"); players can override it in the Netplay window (Advanced).
+#ifndef NETPLAY_DEFAULT_RELAY
+#define NETPLAY_DEFAULT_RELAY ""
+#endif
+constexpr const char* kDefaultRelay = NETPLAY_DEFAULT_RELAY;
+constexpr int kRoomCodeLength = 5;
+// No 0/O, 1/I/L, 5/S, 2/Z: codes get read out over voice chat.
+constexpr const char kRoomCodeAlphabet[] = "ABCDEFGHJKMNPQRTUVWXY346789";
+
+// Uppercases and strips anything that isn't a letter or digit ("abc-de " -> "ABCDE").
+inline std::string NormalizeRoomCode(const std::string& in) {
+    std::string out;
+    for (char ch : in) {
+        if (ch >= 'a' && ch <= 'z') {
+            ch = (char) (ch - 'a' + 'A');
+        }
+        if ((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9')) {
+            out.push_back(ch);
+        }
+    }
+    return out;
+}
+
+// Splits "host", "host:port" or "[v6addr]:port". Bare IPv6 addresses are left alone.
+inline void SplitHostPort(const std::string& in, std::string& host, uint16_t& port, uint16_t defaultPort) {
+    host = in;
+    port = defaultPort;
+    while (!host.empty() && host.back() == ' ') {
+        host.pop_back();
+    }
+    while (!host.empty() && host.front() == ' ') {
+        host.erase(host.begin());
+    }
+    if (!host.empty() && host.front() == '[') {
+        size_t close = host.find(']');
+        if (close != std::string::npos) {
+            std::string rest = host.substr(close + 1);
+            host = host.substr(1, close - 1);
+            if (rest.size() > 1 && rest[0] == ':') {
+                int p = atoi(rest.c_str() + 1);
+                if (p > 0 && p < 65536) {
+                    port = (uint16_t) p;
+                }
+            }
+        }
+        return;
+    }
+    size_t colon = host.rfind(':');
+    if (colon != std::string::npos && host.find(':') == colon) {
+        int p = atoi(host.c_str() + colon + 1);
+        if (p > 0 && p < 65536) {
+            port = (uint16_t) p;
+        }
+        host = host.substr(0, colon);
+    }
+}
+
 enum MsgType : uint8_t {
     // client -> server
     C2S_HELLO = 1,     // u16 protocol, str build, str name
@@ -34,6 +99,8 @@ enum MsgType : uint8_t {
     C2S_HASH = 4,      // u32 frame, u32 hash
     C2S_CHAT = 5,      // str text
     C2S_END_REQ = 6,   // (leader only) end the session, everyone returns to the lobby
+    C2S_ROOM_CREATE = 7, // (relay only, first message) u16 protocol
+    C2S_ROOM_JOIN = 8,   // (relay only, first message) u16 protocol, str code
 
     // server -> client
     S2C_WELCOME = 64,     // u8 yourSlot
@@ -45,6 +112,7 @@ enum MsgType : uint8_t {
     S2C_PLAYER_LEFT = 70, // u8 slot, str name   (their controller goes neutral, race continues)
     S2C_CHAT = 71,        // u8 slot, str text
     S2C_SESSION_END = 72, // str reason
+    S2C_ROOM = 73,        // str code   (relay: you are in this room)
 };
 
 // One controller's state for one frame. 8 bytes on the wire.

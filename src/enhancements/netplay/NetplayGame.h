@@ -21,9 +21,15 @@ struct Status {
     std::vector<std::string> log;
     std::string banner;
     bool desynced = false;
+    std::string roomCode; // set when playing through the online server
 };
 
 std::string BuildId();
+// Online play through the relay server: no port forwarding or VPN for anyone.
+std::string RelayAddress();     // the player's override (Advanced) or the address built into this build
+bool HostOnline(const std::string& name, std::string& err);                            // creates a room code
+bool JoinRoom(const std::string& code, const std::string& name, std::string& err);
+// Direct connections (Advanced): the host needs a forwarded port or a shared VPN.
 bool Host(uint16_t port, const std::string& name, std::string& err);
 bool Join(const std::string& host, uint16_t port, const std::string& name, std::string& err);
 void Leave();

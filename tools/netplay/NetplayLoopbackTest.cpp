@@ -1,8 +1,12 @@
 // Headless loopback test for the netplay core: server + N clients in threads running a toy deterministic sim.
 #include "NetplayClient.h"
 #include "NetplayServer.h"
+#include "RoomRelay.h"
 
 #include <atomic>
+#include <cstring>
+#include <functional>
+#include <mutex>
 #include <chrono>
 #include <cstdio>
 #include <random>
@@ -61,11 +65,53 @@ struct Result {
     int maxStall = 0;
 };
 
-static void RunPlayer(int id, uint16_t port, int frames, int corruptAt, int quitAt, std::atomic<int>* startGate,
+// How a test player gets into a game: direct to a host's port, or through the relay with a room code.
+using ConnectFn = std::function<bool(Client&, int id, std::string& err)>;
+
+static ConnectFn Direct(uint16_t port) {
+    return [port](Client& c, int id, std::string& err) {
+        return c.Connect("127.0.0.1", port, "P" + std::to_string(id), "build-1", err);
+    };
+}
+
+// Player 0 creates a room; everyone else waits for the code and joins it.
+struct SharedCode {
+    std::mutex m;
+    std::string code;
+};
+static ConnectFn ViaRelay(uint16_t relayPort, SharedCode* shared) {
+    return [relayPort, shared](Client& c, int id, std::string& err) {
+        if (id == 0) {
+            if (!c.ConnectRoom("127.0.0.1", relayPort, "", "P0", "build-1", err)) {
+                return false;
+            }
+            std::lock_guard<std::mutex> lk(shared->m);
+            shared->code = c.RoomCode();
+            return true;
+        }
+        std::string code;
+        for (int i = 0; i < 500 && code.empty(); i++) {
+            {
+                std::lock_guard<std::mutex> lk(shared->m);
+                code = shared->code;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        // Friends type codes sloppily
+        std::string typed = code;
+        for (auto& ch : typed) {
+            ch = (char) tolower(ch);
+        }
+        typed.insert(2, "-");
+        return c.ConnectRoom("127.0.0.1", relayPort, typed, "P" + std::to_string(id), "build-1", err);
+    };
+}
+
+static void RunPlayer(int id, ConnectFn connect, int frames, int corruptAt, int quitAt, std::atomic<int>* startGate,
                       Result* res) {
     Client c;
     std::string err;
-    if (!c.Connect("127.0.0.1", port, "P" + std::to_string(id), "build-1", err)) {
+    if (!connect(c, id, err)) {
         printf("  player %d connect failed: %s\n", id, err.c_str());
         return;
     }
@@ -146,20 +192,26 @@ static void RunPlayer(int id, uint16_t port, int frames, int corruptAt, int quit
 }
 
 static void Scenario(const char* name, int players, int frames, int corruptPlayer, int quitPlayer, uint16_t port,
-                     std::vector<Result>& out) {
+                     std::vector<Result>& out, bool viaRelay = false) {
     printf("\n== %s\n", name);
     Server s;
+    RoomRelay relay;
+    SharedCode shared;
     std::string err;
-    if (!s.Start(port, err)) {
+    if (viaRelay ? !relay.Start(port, err) : !s.Start(port, err)) {
         printf("  server failed: %s\n", err.c_str());
         gFails++;
         return;
     }
+    if (viaRelay) {
+        relay.StartThread();
+    }
+    ConnectFn connect = viaRelay ? ViaRelay(port, &shared) : Direct(port);
     std::atomic<int> gate(players);
     out.assign(players, Result{});
     std::vector<std::thread> th;
     for (int i = 0; i < players; i++) {
-        th.emplace_back(RunPlayer, i, port, frames, i == corruptPlayer ? 150 : -1, i == quitPlayer ? 200 : -1, &gate,
+        th.emplace_back(RunPlayer, i, connect, frames, i == corruptPlayer ? 150 : -1, i == quitPlayer ? 200 : -1, &gate,
                         &out[i]);
         std::this_thread::sleep_for(std::chrono::milliseconds(30)); // join in order: player 0 = leader
     }
@@ -167,6 +219,7 @@ static void Scenario(const char* name, int players, int frames, int corruptPlaye
         t.join();
     }
     s.Stop();
+    relay.Stop();
 }
 
 int main() {
@@ -274,6 +327,92 @@ int main() {
         b.BeginSession();
         CHECK(started && runFrames(100), "second session starts and stays identical");
         s.Stop();
+    }
+
+
+    // ---------------- Online relay with room codes ----------------
+    Scenario("relay: 4 players join by room code, 900 frames -> identical games", 4, 900, -1, -1, 25610, r, true);
+    CHECK(r[0].ok && r[1].ok && r[2].ok && r[3].ok, "all players got into the room and finished");
+    CHECK(r[0].finalHash == r[1].finalHash && r[1].finalHash == r[2].finalHash && r[2].finalHash == r[3].finalHash,
+          "final game state identical through the relay");
+    CHECK(!r[0].sawDesync && !r[3].sawDesync, "no false desync alarms");
+
+    Scenario("relay: player 1 quits at frame 200 -> race continues", 3, 500, -1, 1, 25611, r, true);
+    CHECK(r[0].ok && r[2].ok && r[0].frames == 500 && r[2].frames == 500 && r[0].finalHash == r[2].finalHash,
+          "remaining players finished with identical games");
+
+    printf("\n== relay: two groups at once stay separate; bad codes are refused; empty rooms close\n");
+    {
+        RoomRelay relay;
+        std::string err;
+        relay.Start(25612, err);
+        relay.StartThread();
+        auto pollAll = [](std::vector<Client*> cs, int ms) {
+            for (int i = 0; i < ms / 5; i++) {
+                for (Client* c : cs) {
+                    c->Poll();
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        };
+        Client a1, a2, b1, b2, x;
+        bool okA = a1.ConnectRoom("127.0.0.1", 25612, "", "A1", "build-1", err);
+        bool okB = b1.ConnectRoom("127.0.0.1", 25612, "", "B1", "build-1", err);
+        CHECK(okA && okB && a1.RoomCode().size() == (size_t) kRoomCodeLength && a1.RoomCode() != b1.RoomCode(),
+              "each host gets its own 5-letter code");
+        a2.ConnectRoom("127.0.0.1", 25612, a1.RoomCode(), "A2", "build-1", err);
+        b2.ConnectRoom("127.0.0.1", 25612, b1.RoomCode(), "B2", "build-1", err);
+        pollAll({ &a1, &a2, &b1, &b2 }, 200);
+        CHECK(a1.LobbyNames().size() == 2 && a2.LobbyNames().size() == 2 && a1.LobbyNames()[1] == "A2" &&
+                  b1.LobbyNames().size() == 2 && b1.LobbyNames()[1] == "B2",
+              "each lobby only sees its own friends");
+        CHECK(a1.IsLeader() && !a2.IsLeader(), "room creator leads the lobby");
+        err.clear();
+        bool bad = x.ConnectRoom("127.0.0.1", 25612, "QQQQQ", "X", "build-1", err);
+        CHECK(!bad && err.find("No game with code") != std::string::npos, "wrong code refused with a clear message");
+        CHECK(relay.RoomCount() == 2, "two rooms open");
+        a1.Disconnect();
+        a2.Disconnect();
+        pollAll({ &b1, &b2 }, 200);
+        CHECK(relay.RoomCount() == 1, "room closes when everyone leaves");
+        Client late;
+        CHECK(!late.ConnectRoom("127.0.0.1", 25612, "AAAAA", "L", "build-1", err), "closed room can't be joined");
+
+        // Older builds that use plain Join with the relay's address still work (shared direct room).
+        Client d1, d2;
+        d1.Connect("127.0.0.1", 25612, "D1", "build-1", err);
+        d2.Connect("127.0.0.1", 25612, "D2", "build-1", err);
+        pollAll({ &d1, &d2, &b1 }, 200);
+        CHECK(d1.LobbyNames().size() == 2 && d2.LobbyNames().size() == 2 && b1.LobbyNames().size() == 2,
+              "plain Join (no code) still works and stays separate from code rooms");
+        relay.Stop();
+    }
+
+    printf("\n== relay not reachable -> friendly error\n");
+    {
+        Client c;
+        std::string err;
+        CHECK(!c.ConnectRoom("127.0.0.1", 25699, "", "P", "build-1", err) &&
+                  err.find("online server") != std::string::npos,
+              "tells the player the online server can't be reached");
+        CHECK(!c.ConnectRoom("", 25564, "", "P", "build-1", err) && err.find("No online server") != std::string::npos,
+              "tells the player when no server is configured");
+    }
+
+    printf("\n== room code and address parsing\n");
+    {
+        CHECK(NormalizeRoomCode(" ab-c d7 ") == "ABCD7", "codes are case/space/dash insensitive");
+        std::string h;
+        uint16_t p;
+        SplitHostPort("relay.example.com", h, p, 25564);
+        bool a = h == "relay.example.com" && p == 25564;
+        SplitHostPort("1.2.3.4:4000", h, p, 25564);
+        bool b = h == "1.2.3.4" && p == 4000;
+        SplitHostPort("[2001:db8::1]:4001", h, p, 25564);
+        bool c = h == "2001:db8::1" && p == 4001;
+        SplitHostPort("2001:db8::1", h, p, 25564);
+        bool d = h == "2001:db8::1" && p == 25564;
+        CHECK(a && b && c && d, "host, host:port, [v6]:port and bare v6 all parse");
     }
 
     printf("\n%s (%d failure%s)\n", gFails ? "FAILED" : "ALL PASSED", gFails, gFails == 1 ? "" : "s");

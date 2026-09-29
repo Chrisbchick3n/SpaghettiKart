@@ -303,6 +303,39 @@ std::string BuildId() {
     return NETPLAY_BUILD_ID;
 }
 
+std::string RelayAddress() {
+    const char* custom = CVarGetString("gNetplayRelay", "");
+    if (custom != nullptr && custom[0] != '\0') {
+        return custom;
+    }
+    return kDefaultRelay;
+}
+
+static bool ConnectToRoom(const std::string& code, const std::string& name, std::string& err) {
+    Leave();
+    std::string host;
+    uint16_t port;
+    SplitHostPort(RelayAddress(), host, port, kDefaultPort);
+    if (!sState.client.ConnectRoom(host, port, code, name, BuildId(), err)) {
+        return false;
+    }
+    sState.banner.clear();
+    sState.desynced = false;
+    return true;
+}
+
+bool HostOnline(const std::string& name, std::string& err) {
+    return ConnectToRoom("", name, err);
+}
+
+bool JoinRoom(const std::string& code, const std::string& name, std::string& err) {
+    if (NormalizeRoomCode(code).empty()) {
+        err = "Type the code your friend gave you.";
+        return false;
+    }
+    return ConnectToRoom(code, name, err);
+}
+
 bool Host(uint16_t port, const std::string& name, std::string& err) {
     Leave();
     sState.server = std::make_unique<Server>();
@@ -382,6 +415,7 @@ Status GetStatus() {
     s.log = sState.log;
     s.banner = sState.banner;
     s.desynced = sState.desynced;
+    s.roomCode = sState.client.RoomCode();
     return s;
 }
 

@@ -48,7 +48,7 @@ void Server::Log(const std::string& s) {
     if (mStatus.log.size() > 200) {
         mStatus.log.erase(mStatus.log.begin());
     }
-    fprintf(stderr, "[netplay-host] %s\n", s.c_str());
+    fprintf(stderr, "[%s] %s\n", mLogTag.c_str(), s.c_str());
 }
 
 size_t Server::ActiveCount() const {
@@ -90,34 +90,47 @@ void Server::BroadcastLobby() {
     mStatus.inSession = mInSession;
 }
 
+void Server::Adopt(std::unique_ptr<Connection> conn) {
+    auto p = std::make_unique<Peer>();
+    p->conn = std::move(conn);
+    mPeers.push_back(std::move(p));
+}
+
+void Server::Step() {
+    for (size_t i = 0; i < mPeers.size(); i++) {
+        Peer& p = *mPeers[i];
+        if (p.dropped) {
+            continue; // placeholder for a player who left mid-session
+        }
+        bool alive = p.conn->Pump();
+        Message m;
+        while (p.conn->PopMessage(m)) {
+            HandleMessage(i, m);
+        }
+        if (!alive) {
+            if (RemovePeer(i, "disconnected")) {
+                i--;
+            }
+        }
+    }
+}
+
+void Server::CollectSockets(std::vector<NetSocketHandle>& out) {
+    for (auto& p : mPeers) {
+        if (!p->dropped && p->conn->IsOpen()) {
+            out.push_back(p->conn->Handle());
+        }
+    }
+}
+
 void Server::Run() {
     while (!mStopRequested) {
-        // Accept new connections
         while (Connection* c = mListener.Accept()) {
-            auto p = std::make_unique<Peer>();
-            p->conn.reset(c);
-            mPeers.push_back(std::move(p));
+            Adopt(std::unique_ptr<Connection>(c));
         }
-
+        Step();
         std::vector<NetSocketHandle> socks{ mListener.Handle() };
-        for (size_t i = 0; i < mPeers.size(); i++) {
-            Peer& p = *mPeers[i];
-            if (p.dropped) {
-                continue; // placeholder for a player who left mid-session
-            }
-            bool alive = p.conn->Pump();
-            Message m;
-            while (p.conn->PopMessage(m)) {
-                HandleMessage(i, m);
-            }
-            if (!alive) {
-                if (RemovePeer(i, "disconnected")) {
-                    i--;
-                }
-                continue;
-            }
-            socks.push_back(p.conn->Handle());
-        }
+        CollectSockets(socks);
         WaitReadable(socks, 2);
     }
 }

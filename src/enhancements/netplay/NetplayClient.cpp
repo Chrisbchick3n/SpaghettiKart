@@ -40,12 +40,7 @@ bool Client::TakeSessionEnded(std::string& why) {
     return true;
 }
 
-bool Client::Connect(const std::string& host, uint16_t port, const std::string& name, const std::string& build,
-                     std::string& err) {
-    Disconnect();
-    if (!mConn.Connect(host, port, 5000, err)) {
-        return false;
-    }
+bool Client::SendHello(const std::string& name, const std::string& build, std::string& err) {
     Writer w(C2S_HELLO);
     w.b16(kProtocolVersion).str(build).str(name);
     if (!mConn.Send(w.done())) {
@@ -56,12 +51,86 @@ bool Client::Connect(const std::string& host, uint16_t port, const std::string& 
     mState = State::Lobby;
     mLobbyIndex = -1;
     mLobby.clear();
+    return true;
+}
+
+bool Client::Connect(const std::string& host, uint16_t port, const std::string& name, const std::string& build,
+                     std::string& err) {
+    Disconnect();
+    if (!mConn.Connect(host, port, 5000, err)) {
+        err += " Is the host running, and is the port forwarded or are you on the same VPN?";
+        return false;
+    }
+    if (!SendHello(name, build, err)) {
+        return false;
+    }
     Log("Connected to " + host + ":" + std::to_string(port));
+    return true;
+}
+
+bool Client::ConnectRoom(const std::string& relayHost, uint16_t relayPort, const std::string& roomCode,
+                         const std::string& name, const std::string& build, std::string& err) {
+    Disconnect();
+    if (relayHost.empty()) {
+        err = "No online server is set up in this build. Set one under Advanced, or host on this PC.";
+        return false;
+    }
+    if (!mConn.Connect(relayHost, relayPort, 6000, err)) {
+        err = "Could not reach the online server (" + relayHost + "). Check your internet connection, or the "
+              "server may be down.";
+        return false;
+    }
+    std::string code = NormalizeRoomCode(roomCode);
+    if (code.empty()) {
+        Writer w(C2S_ROOM_CREATE);
+        w.b16(kProtocolVersion);
+        mConn.Send(w.done());
+    } else {
+        Writer w(C2S_ROOM_JOIN);
+        w.b16(kProtocolVersion).str(code);
+        mConn.Send(w.done());
+    }
+    // Wait for the relay to put us in a room.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(6);
+    while (true) {
+        bool alive = mConn.Pump();
+        Message m;
+        if (mConn.PopMessage(m)) {
+            Reader r(m.payload.data(), m.payload.size());
+            if (m.type == S2C_ROOM) {
+                mRoomCode = r.str();
+                break;
+            }
+            if (m.type == S2C_REJECT) {
+                err = r.str();
+                mConn.Close();
+                return false;
+            }
+            continue; // ignore anything else before the room answer
+        }
+        if (!alive) {
+            err = "The online server closed the connection.";
+            mConn.Close();
+            return false;
+        }
+        if (std::chrono::steady_clock::now() > deadline) {
+            err = "The online server did not answer.";
+            mConn.Close();
+            return false;
+        }
+        WaitReadable({ mConn.Handle() }, 50);
+    }
+    if (!SendHello(name, build, err)) {
+        return false;
+    }
+    Log(code.empty() ? "Room " + mRoomCode + " created. Give this code to your friends."
+                     : "Joined room " + mRoomCode + ".");
     return true;
 }
 
 void Client::Disconnect() {
     mConn.Close();
+    mRoomCode.clear();
     bool wasInSession = mState == State::InSession || mState == State::StartPending;
     mState = State::Disconnected;
     mInputs.clear();
