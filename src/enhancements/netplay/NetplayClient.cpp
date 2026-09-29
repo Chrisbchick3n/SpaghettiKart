@@ -47,7 +47,7 @@ bool Client::Connect(const std::string& host, uint16_t port, const std::string& 
         return false;
     }
     Writer w(C2S_HELLO);
-    w.u16(kProtocolVersion).str(build).str(name);
+    w.b16(kProtocolVersion).str(build).str(name);
     if (!mConn.Send(w.done())) {
         err = "Connection dropped right after connecting.";
         mConn.Close();
@@ -95,7 +95,7 @@ void Client::Handle(const Message& m) {
     Reader r(m.payload.data(), m.payload.size());
     switch (m.type) {
         case S2C_WELCOME:
-            mLobbyIndex = r.u8();
+            mLobbyIndex = r.b8();
             break;
         case S2C_REJECT: {
             std::string why = r.str();
@@ -104,10 +104,10 @@ void Client::Handle(const Message& m) {
             break;
         }
         case S2C_LOBBY: {
-            uint8_t n = r.u8();
+            uint8_t n = r.b8();
             std::vector<std::string> names;
             for (int i = 0; i < n && r.ok(); i++) {
-                r.u8();
+                r.b8();
                 names.push_back(r.str());
             }
             if (r.ok()) {
@@ -119,9 +119,9 @@ void Client::Handle(const Message& m) {
             if (mState != State::Lobby) {
                 break;
             }
-            int n = r.u8();
-            int me = r.u8();
-            int delay = r.u8();
+            int n = r.b8();
+            int me = r.b8();
+            int delay = r.b8();
             std::vector<uint8_t> snap = r.blob();
             if (!r.ok() || n < 1 || n > kMaxPlayers || me >= n) {
                 break;
@@ -136,8 +136,8 @@ void Client::Handle(const Message& m) {
             break;
         }
         case S2C_INPUTS: {
-            uint32_t frame = r.u32();
-            int n = r.u8();
+            uint32_t frame = r.b32();
+            int n = r.b8();
             std::vector<Pad> pads;
             for (int i = 0; i < n; i++) {
                 pads.push_back(r.pad());
@@ -148,19 +148,19 @@ void Client::Handle(const Message& m) {
             break;
         }
         case S2C_DESYNC:
-            mDesyncFrame = r.u32();
+            mDesyncFrame = r.b32();
             mDesync = true;
             Log("Desync detected at frame " + std::to_string(mDesyncFrame) +
                 ": the games are no longer identical. Return to the menu and start a new session.");
             break;
         case S2C_PLAYER_LEFT: {
-            int slot = r.u8();
+            int slot = r.b8();
             std::string name = r.str();
             Log(name + " (player " + std::to_string(slot + 1) + ") left. Their kart is now idle.");
             break;
         }
         case S2C_CHAT:
-            r.u8();
+            r.b8();
             Log(r.str());
             break;
         case S2C_SESSION_END: {
@@ -183,7 +183,7 @@ void Client::RequestStart(int inputDelay, const std::vector<uint8_t>& snapshot) 
         return;
     }
     Writer w(C2S_START_REQ);
-    w.u8((uint8_t) inputDelay).blob(snapshot);
+    w.b8((uint8_t) inputDelay).blob(snapshot);
     mConn.Send(w.done());
 }
 
@@ -218,7 +218,7 @@ void Client::BeginSession() {
     Pad neutral;
     for (int f = 0; f < mInputDelay; f++) {
         Writer w(C2S_INPUT);
-        w.u32(mSentUpTo++).pad(neutral);
+        w.b32(mSentUpTo++).pad(neutral);
         mConn.Send(w.done());
     }
 }
@@ -230,7 +230,7 @@ Client::FrameResult Client::ExchangeFrame(const Pad& local, std::vector<Pad>& ou
     // Send this frame's local input, scheduled inputDelay frames ahead (only once per frame).
     if (mSentUpTo == mFrame + (uint32_t) mInputDelay) {
         Writer w(C2S_INPUT);
-        w.u32(mSentUpTo++).pad(local);
+        w.b32(mSentUpTo++).pad(local);
         if (!mConn.Send(w.done())) {
             Log("Lost connection to the host.");
             Disconnect();
@@ -276,7 +276,7 @@ void Client::SendHash(uint32_t frame, uint32_t hash) {
         return;
     }
     Writer w(C2S_HASH);
-    w.u32(frame).u32(hash);
+    w.b32(frame).b32(hash);
     mConn.Send(w.done());
 }
 

@@ -133,8 +133,8 @@ void AddLog(const std::string& s) {
 // ---------------------------------------------------------------------------
 std::vector<uint8_t> BuildSnapshot() {
     Writer w(0); // reuse the serializer; the 5-byte header is stripped below
-    w.u32(kSnapshotMagic);
-    w.u32((uint32_t) kNumSyncedCVars);
+    w.b32(kSnapshotMagic);
+    w.b32((uint32_t) kNumSyncedCVars);
     for (const SyncedCVar& c : kSyncedCVars) {
         bool exists = SettingIsSet(c.name);
         uint32_t bits = 0;
@@ -144,10 +144,10 @@ std::vector<uint8_t> BuildSnapshot() {
         } else {
             bits = (uint32_t) CVarGetInteger(c.name, 0);
         }
-        w.u8(exists ? 1 : 0).u32(bits);
+        w.b8(exists ? 1 : 0).b32(bits);
     }
     for (const RawBlock& b : RawBlocks()) {
-        w.u32((uint32_t) b.size).bytes(b.ptr, b.size);
+        w.b32((uint32_t) b.size).bytes(b.ptr, b.size);
     }
     std::vector<uint8_t> v = w.done();
     return std::vector<uint8_t>(v.begin() + 5, v.end());
@@ -189,12 +189,12 @@ void RestoreLocalState() {
 // Applies settings. Game memory is applied separately in ApplySnapshotMemory(), after the soft reset.
 bool ApplySnapshotSettings(const std::vector<uint8_t>& snap) {
     Reader r(snap.data(), snap.size());
-    if (r.u32() != kSnapshotMagic || r.u32() != kNumSyncedCVars) {
+    if (r.b32() != kSnapshotMagic || r.b32() != kNumSyncedCVars) {
         return false;
     }
     for (const SyncedCVar& c : kSyncedCVars) {
-        bool exists = r.u8() != 0;
-        uint32_t bits = r.u32();
+        bool exists = r.b8() != 0;
+        uint32_t bits = r.b32();
         if (!exists) {
             CVarClear(c.name);
         } else if (c.isFloat) {
@@ -210,21 +210,21 @@ bool ApplySnapshotSettings(const std::vector<uint8_t>& snap) {
 
 bool ApplySnapshotMemory(const std::vector<uint8_t>& snap) {
     Reader r(snap.data(), snap.size());
-    r.u32();
-    r.u32();
+    r.b32();
+    r.b32();
     for (size_t i = 0; i < kNumSyncedCVars; i++) {
-        r.u8();
-        r.u32();
+        r.b8();
+        r.b32();
     }
     for (const RawBlock& b : RawBlocks()) {
-        uint32_t n = r.u32();
+        uint32_t n = r.b32();
         if (!r.ok() || n != b.size) {
             return false;
         }
         // Read into a temp first so a truncated snapshot can't half-apply
         std::vector<uint8_t> tmp(n);
         for (uint32_t k = 0; k < n; k++) {
-            tmp[k] = r.u8();
+            tmp[k] = r.b8();
         }
         if (!r.ok()) {
             return false;

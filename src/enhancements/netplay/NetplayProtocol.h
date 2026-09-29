@@ -70,16 +70,16 @@ class Writer {
         mBuf.push_back(type);
         mBuf.resize(5); // room for length
     }
-    Writer& u8(uint8_t v) {
+    Writer& b8(uint8_t v) {
         mBuf.push_back(v);
         return *this;
     }
-    Writer& u16(uint16_t v) {
+    Writer& b16(uint16_t v) {
         mBuf.push_back(v & 0xFF);
         mBuf.push_back(v >> 8);
         return *this;
     }
-    Writer& u32(uint32_t v) {
+    Writer& b32(uint32_t v) {
         for (int i = 0; i < 4; i++) {
             mBuf.push_back((v >> (8 * i)) & 0xFF);
         }
@@ -87,7 +87,7 @@ class Writer {
     }
     Writer& str(const std::string& s) {
         size_t n = s.size() > 255 ? 255 : s.size();
-        u8((uint8_t) n);
+        b8((uint8_t) n);
         mBuf.insert(mBuf.end(), s.begin(), s.begin() + n);
         return *this;
     }
@@ -97,16 +97,16 @@ class Writer {
         return *this;
     }
     Writer& blob(const std::vector<uint8_t>& v) {
-        u32((uint32_t) v.size());
+        b32((uint32_t) v.size());
         return bytes(v.data(), v.size());
     }
     Writer& pad(const Pad& p) {
-        u16(p.button);
-        u8((uint8_t) p.stickX);
-        u8((uint8_t) p.stickY);
-        u8((uint8_t) p.rightStickX);
-        u8((uint8_t) p.rightStickY);
-        return u16(0); // reserved
+        b16(p.button);
+        b8((uint8_t) p.stickX);
+        b8((uint8_t) p.stickY);
+        b8((uint8_t) p.rightStickX);
+        b8((uint8_t) p.rightStickY);
+        return b16(0); // reserved
     }
     // Finalize: fills in the length field and returns the full message.
     const std::vector<uint8_t>& done() {
@@ -128,13 +128,13 @@ class Reader {
     bool ok() const {
         return mOk;
     }
-    uint8_t u8() {
+    uint8_t b8() {
         if (!need(1)) {
             return 0;
         }
         return mP[mI++];
     }
-    uint16_t u16() {
+    uint16_t b16() {
         if (!need(2)) {
             return 0;
         }
@@ -142,7 +142,7 @@ class Reader {
         mI += 2;
         return v;
     }
-    uint32_t u32() {
+    uint32_t b32() {
         if (!need(4)) {
             return 0;
         }
@@ -154,7 +154,7 @@ class Reader {
         return v;
     }
     std::string str() {
-        uint8_t n = u8();
+        uint8_t n = b8();
         if (!need(n)) {
             return {};
         }
@@ -163,7 +163,7 @@ class Reader {
         return s;
     }
     std::vector<uint8_t> blob() {
-        uint32_t n = u32();
+        uint32_t n = b32();
         if (!need(n)) {
             return {};
         }
@@ -173,12 +173,12 @@ class Reader {
     }
     Pad pad() {
         Pad p;
-        p.button = u16();
-        p.stickX = (int8_t) u8();
-        p.stickY = (int8_t) u8();
-        p.rightStickX = (int8_t) u8();
-        p.rightStickY = (int8_t) u8();
-        u16(); // reserved
+        p.button = b16();
+        p.stickX = (int8_t) b8();
+        p.stickY = (int8_t) b8();
+        p.rightStickX = (int8_t) b8();
+        p.rightStickY = (int8_t) b8();
+        b16(); // reserved
         return p;
     }
 

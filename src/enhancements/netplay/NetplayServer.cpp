@@ -77,9 +77,9 @@ void Server::BroadcastLobby() {
             hello.push_back(p.get());
         }
     }
-    w.u8((uint8_t) hello.size());
+    w.b8((uint8_t) hello.size());
     for (size_t i = 0; i < hello.size(); i++) {
-        w.u8((uint8_t) i).str(hello[i]->name);
+        w.b8((uint8_t) i).str(hello[i]->name);
     }
     Broadcast(w.done());
     std::lock_guard<std::mutex> lk(mStatusMutex);
@@ -134,7 +134,7 @@ bool Server::RemovePeer(size_t idx, const std::string& why) {
         p.dropped = true;
         p.conn->Close();
         Writer w(S2C_PLAYER_LEFT);
-        w.u8((uint8_t) p.controller).str(name);
+        w.b8((uint8_t) p.controller).str(name);
         Broadcast(w.done());
         if (ActiveCount() == 0) {
             EndSession("everyone left"); // this erases dropped placeholders, including this one
@@ -181,7 +181,7 @@ void Server::HandleMessage(size_t idx, const Message& m) {
 
     switch (m.type) {
         case C2S_HELLO: {
-            uint16_t proto = r.u16();
+            uint16_t proto = r.b16();
             std::string build = r.str();
             std::string name = r.str();
             if (!r.ok() || p.hello) {
@@ -224,13 +224,13 @@ void Server::HandleMessage(size_t idx, const Message& m) {
                 }
             }
             Writer w(S2C_WELCOME);
-            w.u8((uint8_t) pos);
+            w.b8((uint8_t) pos);
             p.conn->Send(w.done());
             BroadcastLobby();
             break;
         }
         case C2S_START_REQ: {
-            uint8_t delay = r.u8();
+            uint8_t delay = r.b8();
             std::vector<uint8_t> snapshot = r.blob();
             if (!r.ok() || !p.hello || mInSession) {
                 return;
@@ -269,7 +269,7 @@ void Server::HandleMessage(size_t idx, const Message& m) {
             for (auto& o : mPeers) {
                 if (o->hello) {
                     Writer w(S2C_START);
-                    w.u8((uint8_t) mNumPlayers).u8((uint8_t) o->controller).u8(delay).blob(snapshot);
+                    w.b8((uint8_t) mNumPlayers).b8((uint8_t) o->controller).b8(delay).blob(snapshot);
                     o->conn->Send(w.done());
                 }
             }
@@ -279,7 +279,7 @@ void Server::HandleMessage(size_t idx, const Message& m) {
             break;
         }
         case C2S_INPUT: {
-            uint32_t frame = r.u32();
+            uint32_t frame = r.b32();
             Pad pad = r.pad();
             if (!r.ok() || !mInSession || p.controller < 0 || p.dropped) {
                 return;
@@ -294,8 +294,8 @@ void Server::HandleMessage(size_t idx, const Message& m) {
             break;
         }
         case C2S_HASH: {
-            uint32_t frame = r.u32();
-            uint32_t hash = r.u32();
+            uint32_t frame = r.b32();
+            uint32_t hash = r.b32();
             if (!r.ok() || !mInSession || p.controller < 0) {
                 return;
             }
@@ -325,7 +325,7 @@ void Server::HandleMessage(size_t idx, const Message& m) {
                 return;
             }
             Writer w(S2C_CHAT);
-            w.u8((uint8_t) (p.controller < 0 ? 0 : p.controller)).str(p.name + ": " + text);
+            w.b8((uint8_t) (p.controller < 0 ? 0 : p.controller)).str(p.name + ": " + text);
             Broadcast(w.done());
             break;
         }
@@ -354,7 +354,7 @@ void Server::TryAdvance() {
             pads[o->controller] = it->second;
         }
         Writer w(S2C_INPUTS);
-        w.u32(mNextBroadcast).u8((uint8_t) mNumPlayers);
+        w.b32(mNextBroadcast).b8((uint8_t) mNumPlayers);
         for (const Pad& pd : pads) {
             w.pad(pd);
         }
@@ -389,7 +389,7 @@ void Server::CheckHashes(uint32_t frame) {
         mLastDesyncFrame = frame;
         Log("DESYNC detected at frame " + std::to_string(frame));
         Writer w(S2C_DESYNC);
-        w.u32(frame);
+        w.b32(frame);
         Broadcast(w.done());
     }
     // Forget this and anything older
