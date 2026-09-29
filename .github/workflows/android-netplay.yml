@@ -81,16 +81,20 @@ jobs:
         name: spaghetti.o2r
         path: android/app/src/main/assets
 
-    - name: Configure Gradle permissions
-      run: chmod +x android/gradlew
+    # The repository's gradle-wrapper.jar doesn't match any official Gradle release, so it is removed and never
+    # run. An official Gradle of the version the project asks for (gradle-wrapper.properties) is used instead.
+    - name: Remove unverified Gradle wrapper jar
+      run: rm -f android/gradle/wrapper/gradle-wrapper.jar
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: '8.13'
 
     - name: Build Netplay APK
       run: |
         cd android/
-        ./gradlew assembleNetplay
+        gradle assembleNetplay
         mv app/build/outputs/apk/netplay/app-netplay.apk ../spaghettikart-netplay.apk
 
     - name: Upload Netplay APK
