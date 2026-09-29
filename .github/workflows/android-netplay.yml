@@ -1,0 +1,98 @@
+name: Android Netplay Build
+
+# Builds an optimized SpaghettiKart APK with online netplay. It is signed with the standard debug key
+# (no private keystore needed), and installs next to the normal SpaghettiKart app.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ netplay-android ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generate-port-o2r:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y gcc g++ git cmake ninja-build lsb-release
+
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1.2.18
+      with:
+        key: ${{ runner.os }}-o2r-ccache-${{ github.ref }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-o2r-ccache-${{ github.ref }}
+          ${{ runner.os }}-o2r-ccache-
+
+    - name: Build Torch
+      run: |
+        export PATH="/usr/lib/ccache:/usr/local/opt/ccache/libexec:$PATH"
+        cmake -S torch -B torch/build-host -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DUSE_STANDALONE=ON \
+          -DBUILD_MK64=ON \
+          -DBUILD_NAUDIO=ON \
+          -DBUILD_SM64=OFF \
+          -DBUILD_SF64=OFF \
+          -DBUILD_FZERO=OFF \
+          -DBUILD_MARIO_ARTIST=OFF
+        cmake --build torch/build-host --parallel
+
+    - name: Generate spaghetti.o2r
+      run: torch/build-host/torch pack assets spaghetti.o2r o2r
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: spaghetti.o2r
+        path: spaghetti.o2r
+        retention-days: 1
+
+  build-android-netplay:
+    needs: generate-port-o2r
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+    - name: Download spaghetti.o2r
+      uses: actions/download-artifact@v4
+      with:
+        name: spaghetti.o2r
+        path: android/app/src/main/assets
+
+    - name: Configure Gradle permissions
+      run: chmod +x android/gradlew
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Build Netplay APK
+      run: |
+        cd android/
+        ./gradlew assembleNetplay
+        mv app/build/outputs/apk/netplay/app-netplay.apk ../spaghettikart-netplay.apk
+
+    - name: Upload Netplay APK
+      uses: actions/upload-artifact@v4
+      with:
+        name: spaghetti-kart-netplay-apk
+        path: spaghettikart-netplay.apk

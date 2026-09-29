@@ -73,6 +73,7 @@ class PortMenu : public Ship::Menu {
     void AddSettings();
     void AddEnhancements();
       void AddRulesets();
+    void AddNetplay();
     void AddDevTools();
       void AddSceneVisibility();
 };

@@ -97,6 +97,14 @@ android {
                 debugSymbolLevel = "SYMBOL_TABLE"
             }
         }
+        create("netplay") {
+            // Optimized like release, but signed with the standard debug key so anyone's fork can build it
+            // without the project's private keystore. Installs next to the normal app.
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            applicationIdSuffix = ".netplay"
+            matchingFallbacks += listOf("release")
+        }
     }
 
     externalNativeBuild {

@@ -12,6 +12,17 @@
 #include "code_80057C60.h"
 #include "port/Game.h"
 #include "buffers.h"
+#include "enhancements/netplay/netplay.h"
+
+// During an online session everyone temporarily plays with the host's save data, so writes to this
+// player's save file are skipped. Their real save is restored in memory when the session ends.
+static s32 netplay_guarded_eeprom_long_write(OSMesgQueue* mq, u8 address, u8* buffer, int nbytes) {
+    if (Netplay_BlocksSaving()) {
+        return 0;
+    }
+    return osEepromLongWrite(mq, address, buffer, nbytes);
+}
+#define osEepromLongWrite netplay_guarded_eeprom_long_write
 
 /*** macros ***/
 #define PFS_COMPANY_CODE(c0, c1) ((u16) (((c0) << 8) | ((c1))))

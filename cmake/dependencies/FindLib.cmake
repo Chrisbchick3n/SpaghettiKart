@@ -51,3 +51,24 @@ endif()
 
 target_link_libraries(${PROJECT_NAME}
                       PRIVATE torch ${ADDITIONAL_LIBRARY_DEPENDENCIES})
+
+# Online netplay: sockets on Windows, and a build id so only identical builds can race together.
+if(WIN32)
+  target_link_libraries(${PROJECT_NAME} PRIVATE ws2_32)
+endif()
+# Everyone in a session must run identical game code. The id is the exact source commit, so builds of the same
+# commit for different systems (Windows, Mac, Linux, Android) can race each other.
+execute_process(
+  COMMAND git -c safe.directory=${CMAKE_SOURCE_DIR} rev-parse --short=12 HEAD
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  OUTPUT_VARIABLE NETPLAY_COMMIT
+  ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NETPLAY_COMMIT STREQUAL "")
+  set(NETPLAY_COMMIT "${PROJECT_VERSION}")
+endif()
+target_compile_definitions(${PROJECT_NAME} PRIVATE NETPLAY_BUILD_ID="SpaghettiKart-${NETPLAY_COMMIT}")
+# Don't let the compiler fuse multiply+add into one instruction: ARM chips (phones, Apple Silicon) would then
+# compute physics slightly differently from x86 PCs and online races would desync.
+if(NOT MSVC)
+  target_compile_options(${PROJECT_NAME} PRIVATE -ffp-contract=off)
+endif()

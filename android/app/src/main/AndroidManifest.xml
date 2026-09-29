@@ -34,6 +34,9 @@
     <!-- Rumble -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Online netplay (hosting and joining races over the internet / LAN) -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <!--
         No storage permissions: the ROM is read once through the document
         picker, and everything the game writes lives in the app's own external

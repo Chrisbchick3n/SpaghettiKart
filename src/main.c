@@ -40,6 +40,7 @@
 #include "port/Game.h"
 #include "port/Engine.h"
 #include "engine/Matrix.h"
+#include "enhancements/netplay/netplay.h"
 
 // Declarations (not in this file)
 void func_80091B78(void);
@@ -393,6 +394,8 @@ void read_controllers(void) {
     osContStartReadData(&gSIEventMesgQueue);
     // osRecvMesg(&gSIEventMesgQueue, &msg, OS_MESG_BLOCK);
     osContGetReadData(gControllerPads);
+    // Online play: swaps in every player's synchronized input for this frame (no-op when offline).
+    Netplay_OnControllersRead(gControllerPads);
     update_controller(0);
     update_controller(1);
     update_controller(2);
