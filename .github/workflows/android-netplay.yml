@@ -11,6 +11,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Online server for "Host a game" / "Join a game" (game codes). Set as a repo variable named NETPLAY_RELAY;
+# Gradle passes the environment through to CMake, which builds it into the app.
+env:
+  NETPLAY_RELAY: ${{ vars.NETPLAY_RELAY }}
+
 jobs:
   generate-port-o2r:
     runs-on: ubuntu-22.04

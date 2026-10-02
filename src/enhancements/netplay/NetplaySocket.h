@@ -44,6 +44,10 @@ class Connection {
     // Returns false if the connection closed or errored.
     bool Pump();
     bool PopMessage(Message& out);
+    // Puts a message back at the front of the inbox (the relay peeks at the first message).
+    void PushFront(Message m) {
+        mInbox.push_front(std::move(m));
+    }
 
     NetSocketHandle Handle() const {
         return mSock;

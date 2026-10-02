@@ -72,3 +72,9 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE NETPLAY_BUILD_ID="SpaghettiKa
 if(NOT MSVC)
   target_compile_options(${PROJECT_NAME} PRIVATE -ffp-contract=off)
 endif()
+# The online server used by "Host a game" / "Join a game" (room codes). "host" or "host:port".
+# CI fills it from the NETPLAY_RELAY repository variable; players can still override it in the game.
+set(NETPLAY_DEFAULT_RELAY "$ENV{NETPLAY_RELAY}" CACHE STRING "Default netplay relay server address (host or host:port)")
+if(NETPLAY_DEFAULT_RELAY)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE NETPLAY_DEFAULT_RELAY="${NETPLAY_DEFAULT_RELAY}")
+endif()

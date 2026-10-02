@@ -1,6 +1,11 @@
 #pragma once
-// Netplay host/relay. Runs on its own thread. Has no dependency on the game, so the same code is used
-// both inside SpaghettiKart ("Host" button) and in the standalone spaghetti-netplay-relay program.
+// Netplay host/relay. Has no dependency on the game, so the same code is used both inside SpaghettiKart
+// ("Host on this PC") and in the standalone spaghetti-netplay-relay program.
+//
+// Two ways to drive it:
+//  - Start(port): listens on a TCP port and runs on its own thread (hosting from inside the game).
+//  - Adopt()/Step(): no listener, no thread. The owner hands it connections and calls Step() regularly.
+//    The online relay uses this to run one Server per room code.
 #include "NetplayProtocol.h"
 #include "NetplaySocket.h"
 
@@ -24,6 +29,17 @@ class Server {
     }
     uint16_t Port() const {
         return mPort;
+    }
+
+    // Manual mode (see top of file). Not thread-safe with Start(); use one or the other.
+    void Adopt(std::unique_ptr<Connection> conn);
+    void Step();                                            // process everything that has arrived
+    void CollectSockets(std::vector<NetSocketHandle>& out); // sockets worth waiting on
+    size_t PeerCount() const {
+        return mPeers.size();
+    }
+    void SetLogTag(const std::string& tag) {
+        mLogTag = tag;
     }
 
     struct Status {
@@ -61,6 +77,7 @@ class Server {
     std::atomic<bool> mRunning{ false };
     std::atomic<bool> mStopRequested{ false };
     uint16_t mPort = 0;
+    std::string mLogTag = "netplay-host";
 
     // Owned by the server thread
     std::vector<std::unique_ptr<Peer>> mPeers; // index 0 = leader (may start the session)

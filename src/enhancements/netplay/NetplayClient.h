@@ -17,6 +17,13 @@ class Client {
 
     bool Connect(const std::string& host, uint16_t port, const std::string& name, const std::string& build,
                  std::string& err);
+    // Online play through a relay. Empty roomCode = create a new room. On success RoomCode() holds the code
+    // to give to friends.
+    bool ConnectRoom(const std::string& relayHost, uint16_t relayPort, const std::string& roomCode,
+                     const std::string& name, const std::string& build, std::string& err);
+    const std::string& RoomCode() const {
+        return mRoomCode;
+    }
     void Disconnect();
 
     // Call every frame (lobby or session). Processes network messages.
@@ -73,9 +80,11 @@ class Client {
 
   private:
     void Handle(const Message& m);
+    bool SendHello(const std::string& name, const std::string& build, std::string& err);
     void Log(const std::string& s);
 
     Connection mConn;
+    std::string mRoomCode;
     State mState = State::Disconnected;
     int mLobbyIndex = -1;
     std::vector<std::string> mLobby;

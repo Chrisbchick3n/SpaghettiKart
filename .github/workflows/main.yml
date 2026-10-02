@@ -8,7 +8,26 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Address of the online netplay server (room codes). Set it once in the repo: Settings > Secrets and variables >
+# Actions > Variables > New repository variable, name NETPLAY_RELAY, value e.g. my-relay.fly.dev or 1.2.3.4:25564.
+env:
+  NETPLAY_RELAY: ${{ vars.NETPLAY_RELAY }}
+
 jobs:
+  netplay-relay:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build relay and run netplay tests
+      run: |
+        cmake -S tools/netplay -B build-netplay -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXE_LINKER_FLAGS="-static"
+        cmake --build build-netplay -j3
+        ./build-netplay/netplay-loopback-test
+    - uses: actions/upload-artifact@v4
+      with:
+        name: spaghetti-netplay-relay-linux-x64
+        path: build-netplay/spaghetti-netplay-relay
+
   generate-port-o2r:
     runs-on: ubuntu-22.04
     steps:

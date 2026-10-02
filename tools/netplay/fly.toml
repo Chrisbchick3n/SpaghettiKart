@@ -1,0 +1,24 @@
+# Fly.io config for the SpaghettiKart online relay. From this folder:
+#   fly launch --no-deploy --copy-config --name <pick-a-name>   (first time only)
+#   fly ips allocate-v4                                         (raw TCP games need a dedicated IPv4)
+#   fly deploy
+# Then set the repo variable NETPLAY_RELAY to <pick-a-name>.fly.dev and rebuild the game.
+app = "spaghetti-relay"
+primary_region = "iad" # US East. Pick the region closest to most of your players.
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[services]]
+  internal_port = 25564
+  protocol = "tcp"
+  auto_stop_machines = "off"  # games need the relay awake all the time
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 25564               # no handlers = plain TCP passed straight through
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
